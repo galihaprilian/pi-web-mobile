@@ -382,6 +382,19 @@ async function apiHandler(req: any, res: any, next: () => void) {
       return;
     }
 
+    if (url.pathname === "/api/health" && method === "GET") {
+      const startup = readStartupState();
+      json(res, 200, {
+        ok: true,
+        service: "pi-web-mobile",
+        timestamp: new Date().toISOString(),
+        runtimeMode: startup.runtimeMode || "unknown",
+        launchMode: startup.launchMode || "unknown",
+        servicePort: startup.servicePort || 5173,
+      });
+      return;
+    }
+
     if (url.pathname === "/api/chat/stream" && method === "POST") {
       const body = await readBody(req);
       res.statusCode = 200;
