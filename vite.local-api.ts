@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { getModels, streamSimple } from "@mariozechner/pi-ai";
 import { getOAuthProvider, getOAuthProviders, type OAuthCredentials, type OAuthPrompt } from "@mariozechner/pi-ai/oauth";
@@ -38,6 +38,9 @@ const SESSIONS_ROOT = path.join(AGENT_DIR, "sessions");
 const APP_STATE_DIR = path.join(os.homedir(), ".config", "pi-web-mobile");
 const STARTUP_STATE_PATH = path.join(APP_STATE_DIR, "runtime-state.json");
 const HOME_DIR = os.homedir();
+const MAX_READ_LINES = 400;
+const MAX_READ_BYTES = 50 * 1024;
+const MAX_BASH_OUTPUT_BYTES = 50 * 1024;
 const loginSessions = new Map<string, LoginSessionState>();
 let piCodingAgentModulePromise: Promise<any> | undefined;
 let piMessagesModulePromise: Promise<any> | undefined;
@@ -144,6 +147,118 @@ function absoluteProjectPath(relativePath: string): string {
 
 function displayProjectPath(relativePath: string): string {
   return relativePath ? `~/${relativePath}` : "~";
+}
+
+function normalizeRelativeToolPath(input: unknown): string {
+  const candidate = String(input ?? ".").trim();
+  if (!candidate) return ".";
+  return candidate;
+}
+
+function ensureWithinProjectRoot(projectRoot: string, targetPath: string): string {
+  const resolvedRoot = path.resolve(projectRoot);
+  const resolvedTarget = path.resolve(resolvedRoot, targetPath);
+
+  if (!resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`) && resolvedTarget !== resolvedRoot) {
+    throw new Error("Tool path must stay inside selected project root");
+  }
+
+  return resolvedTarget;
+}
+
+function toProjectRelativePath(projectRoot: string, absolutePath: string): string {
+  const relative = path.relative(projectRoot, absolutePath);
+  if (!relative || relative === "") return ".";
+  return relative.split(path.sep).join("/");
+}
+
+function truncateByBytes(input: string, maxBytes: number): { text: string; truncated: boolean } {
+  const bytes = Buffer.byteLength(input, "utf8");
+  if (bytes <= maxBytes) {
+    return { text: input, truncated: false };
+  }
+
+  const approx = input.slice(0, Math.max(0, Math.floor((maxBytes / bytes) * input.length)));
+  return {
+    text: `${approx}\n\n... (truncated output)` ,
+    truncated: true,
+  };
+}
+
+function applyExactEdits(content: string, edits: Array<{ oldText: string; newText: string }>): string {
+  const ranges = edits.map((entry, index) => {
+    if (!entry.oldText) {
+      throw new Error(`Edit #${index + 1}: oldText must not be empty`);
+    }
+
+    const first = content.indexOf(entry.oldText);
+    if (first === -1) {
+      throw new Error(`Edit #${index + 1}: oldText not found`);
+    }
+
+    const second = content.indexOf(entry.oldText, first + entry.oldText.length);
+    if (second !== -1) {
+      throw new Error(`Edit #${index + 1}: oldText must match exactly one location`);
+    }
+
+    return {
+      start: first,
+      end: first + entry.oldText.length,
+      oldText: entry.oldText,
+      newText: entry.newText,
+    };
+  });
+
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i]!.start < sorted[i - 1]!.end) {
+      throw new Error("Edits must not overlap");
+    }
+  }
+
+  let cursor = 0;
+  let output = "";
+  for (const range of sorted) {
+    output += content.slice(cursor, range.start);
+    output += range.newText;
+    cursor = range.end;
+  }
+  output += content.slice(cursor);
+  return output;
+}
+
+async function runBash(command: string, cwd: string, timeoutSeconds?: number): Promise<{
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+}> {
+  return await new Promise((resolve, reject) => {
+    exec(
+      command,
+      {
+        cwd,
+        shell: "/bin/bash",
+        timeout: (timeoutSeconds || 60) * 1000,
+        maxBuffer: 2 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error && (error as any).code === "ENOENT") {
+          reject(error);
+          return;
+        }
+
+        const timedOut = Boolean((error as any)?.killed) && (error as any)?.signal === "SIGTERM";
+        const exitCode = typeof (error as any)?.code === "number" ? Number((error as any).code) : 0;
+        resolve({
+          stdout: String(stdout || ""),
+          stderr: String(stderr || ""),
+          exitCode,
+          timedOut,
+        });
+      },
+    );
+  });
 }
 
 function getPiCodingAgentModulePath(relativeModulePath: string): string {
@@ -619,6 +734,144 @@ async function apiHandler(req: any, res: any, next: () => void) {
       }
 
       json(res, 200, { ok: true });
+      return;
+    }
+
+    if (url.pathname === "/api/tools/execute" && method === "POST") {
+      const body = await readBody(req);
+      const tool = String(body.tool || "").trim();
+      const args = (body.args || {}) as Record<string, unknown>;
+      const projectPath = sanitizeRelativeProjectPath(body.projectPath);
+      const projectRoot = absoluteProjectPath(projectPath);
+
+      if (tool === "list_files") {
+        const relativePath = normalizeRelativeToolPath(args.path);
+        const targetDir = ensureWithinProjectRoot(projectRoot, relativePath);
+        const stats = fs.statSync(targetDir);
+        if (!stats.isDirectory()) {
+          throw new Error("Path is not a directory");
+        }
+
+        const entries = fs.readdirSync(targetDir, { withFileTypes: true })
+          .map((entry) => `${entry.isDirectory() ? "[D]" : "[F]"} ${entry.name}`)
+          .sort((a, b) => a.localeCompare(b));
+
+        const relative = toProjectRelativePath(projectRoot, targetDir);
+        const text = [
+          `Directory: ${relative}`,
+          "",
+          ...(entries.length > 0 ? entries : ["(empty directory)"]),
+        ].join("\n");
+
+        json(res, 200, {
+          content: [{ type: "text", text }],
+          details: {
+            path: relative,
+            entries,
+          },
+        });
+        return;
+      }
+
+      if (tool === "read") {
+        const filePathArg = normalizeRelativeToolPath(args.path);
+        const targetFile = ensureWithinProjectRoot(projectRoot, filePathArg);
+        const stats = fs.statSync(targetFile);
+        if (!stats.isFile()) {
+          throw new Error("Path is not a file");
+        }
+
+        const content = fs.readFileSync(targetFile, "utf8");
+        const lines = content.split("\n");
+        const limited = lines.slice(0, MAX_READ_LINES).join("\n");
+        const byteLimited = truncateByBytes(limited, MAX_READ_BYTES);
+        const truncated = lines.length > MAX_READ_LINES || byteLimited.truncated;
+        const relative = toProjectRelativePath(projectRoot, targetFile);
+        const text = `${byteLimited.text}${truncated ? "\n\n... (truncated read)" : ""}`;
+
+        json(res, 200, {
+          content: [{ type: "text", text }],
+          details: {
+            path: relative,
+            lineCount: lines.length,
+            truncated,
+          },
+        });
+        return;
+      }
+
+      if (tool === "write") {
+        const filePathArg = normalizeRelativeToolPath(args.path);
+        const content = String(args.content ?? "");
+        const targetFile = ensureWithinProjectRoot(projectRoot, filePathArg);
+        fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+        fs.writeFileSync(targetFile, content, "utf8");
+        const relative = toProjectRelativePath(projectRoot, targetFile);
+
+        json(res, 200, {
+          content: [{ type: "text", text: `Wrote file: ${relative}` }],
+          details: {
+            path: relative,
+            bytes: Buffer.byteLength(content, "utf8"),
+          },
+        });
+        return;
+      }
+
+      if (tool === "edit") {
+        const filePathArg = normalizeRelativeToolPath(args.path);
+        const edits = Array.isArray(args.edits) ? args.edits : [];
+        if (edits.length === 0) {
+          throw new Error("edits must be a non-empty array");
+        }
+
+        const normalizedEdits = edits.map((entry, index) => {
+          const oldText = String((entry as any).oldText ?? "");
+          const newText = String((entry as any).newText ?? "");
+          if (!oldText) {
+            throw new Error(`Edit #${index + 1}: oldText must not be empty`);
+          }
+          return { oldText, newText };
+        });
+
+        const targetFile = ensureWithinProjectRoot(projectRoot, filePathArg);
+        const current = fs.readFileSync(targetFile, "utf8");
+        const updated = applyExactEdits(current, normalizedEdits);
+        fs.writeFileSync(targetFile, updated, "utf8");
+        const relative = toProjectRelativePath(projectRoot, targetFile);
+
+        json(res, 200, {
+          content: [{ type: "text", text: `Applied ${normalizedEdits.length} edits to ${relative}` }],
+          details: {
+            path: relative,
+            appliedEdits: normalizedEdits.length,
+          },
+        });
+        return;
+      }
+
+      if (tool === "bash") {
+        const command = String(args.command ?? "").trim();
+        if (!command) {
+          throw new Error("command must not be empty");
+        }
+
+        const timeout = Number(args.timeout || 60);
+        const result = await runBash(command, projectRoot, timeout);
+        const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+        const truncated = truncateByBytes(combined || "(no output)", MAX_BASH_OUTPUT_BYTES);
+
+        json(res, 200, {
+          content: [{ type: "text", text: truncated.text }],
+          details: {
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+          },
+        });
+        return;
+      }
+
+      json(res, 400, { error: `Unsupported tool: ${tool}` });
       return;
     }
 

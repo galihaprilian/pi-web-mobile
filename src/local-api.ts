@@ -74,6 +74,11 @@ export interface PiSessionData {
   model?: any;
 }
 
+export interface LocalToolExecutionResult<TDetails = unknown> {
+  content: Array<{ type: "text"; text: string }>;
+  details: TDetails;
+}
+
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     headers: {
@@ -161,6 +166,17 @@ export async function appendPiSession(payload: {
   messages: any[];
 }): Promise<void> {
   await request("/api/pi-session/append", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function executeLocalTool<TArgs extends object, TDetails = unknown>(payload: {
+  tool: string;
+  args: TArgs;
+  projectPath: string;
+}): Promise<LocalToolExecutionResult<TDetails>> {
+  return request<LocalToolExecutionResult<TDetails>>("/api/tools/execute", {
     method: "POST",
     body: JSON.stringify(payload),
   });

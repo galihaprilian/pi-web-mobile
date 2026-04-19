@@ -50,6 +50,7 @@ import {
   type ProjectDirectoryResponse,
 } from "./local-api";
 import { SubscriptionAuthTab } from "./subscription-tab";
+import { createLocalTools } from "./local-tools";
 
 registerCustomMessageRenderers();
 
@@ -109,6 +110,13 @@ type HistorySessionItem = {
   path?: string;
 };
 
+type ToolApprovalRequest = {
+  toolCallId: string;
+  toolName: string;
+  argsText: string;
+  createdAt: number;
+};
+
 let currentSessionId: string | undefined;
 let currentPiSessionPath: string | undefined;
 let currentPiSyncedMessageCount = 0;
@@ -152,6 +160,8 @@ let debugLastAction = "idle";
 let debugLastError = "";
 let debugSendCount = 0;
 let isDebugVisible = false;
+let pendingToolApprovals: ToolApprovalRequest[] = [];
+const pendingToolApprovalResolvers = new Map<string, (approved: boolean) => void>();
 
 const generateTitle = (messages: AgentMessage[]): string => {
   const firstUserMessage = messages.find((message) => {
@@ -220,6 +230,102 @@ const formatTokenCount = (value: number) => {
 
 const formatProjectPath = (relativePath: string) => {
   return relativePath ? `~/${relativePath}` : "~";
+};
+
+const buildSystemPrompt = (projectPath: string) => {
+  const projectInstruction = `Current project folder: ${formatProjectPath(projectPath)}`;
+
+  return `You are a helpful AI assistant with access to local tools.
+
+${projectInstruction}
+
+Available tools:
+- list_files: List files/directories in the selected project.
+- read: Read file contents.
+- write: Create or overwrite files.
+- edit: Apply exact text replacement edits.
+- bash: Run shell commands in the selected project.
+- JavaScript REPL: Execute JavaScript code in a sandboxed browser environment.
+- Artifacts: Create interactive HTML, SVG, Markdown, and text artifacts.
+
+Always inspect files before editing. Keep tool paths inside selected project root.`;
+};
+
+const buildAgentTools = (projectPath: string) => {
+  const replTool = createJavaScriptReplTool();
+  (replTool as any).runtimeProvidersFactory = () => [];
+  return [...createLocalTools(projectPath), replTool];
+};
+
+const toPrettyJson = (value: unknown) => {
+  try {
+    const serialized = JSON.stringify(value, null, 2) || "{}";
+    return serialized.length > 2000 ? `${serialized.slice(0, 2000)}\n...` : serialized;
+  } catch {
+    return String(value);
+  }
+};
+
+const resolveToolApproval = (toolCallId: string, approved: boolean) => {
+  const resolve = pendingToolApprovalResolvers.get(toolCallId);
+  if (!resolve) return;
+
+  pendingToolApprovalResolvers.delete(toolCallId);
+  pendingToolApprovals = pendingToolApprovals.filter((item) => item.toolCallId !== toolCallId);
+  resolve(approved);
+  renderApp();
+};
+
+const clearPendingToolApprovals = () => {
+  const resolvers = Array.from(pendingToolApprovalResolvers.values());
+  pendingToolApprovalResolvers.clear();
+  pendingToolApprovals = [];
+  for (const resolve of resolvers) {
+    resolve(false);
+  }
+};
+
+const requestToolApproval = async (
+  toolCallId: string,
+  toolName: string,
+  args: unknown,
+  signal?: AbortSignal,
+): Promise<boolean> => {
+  if (signal?.aborted) {
+    return false;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+
+    const finalize = (approved: boolean) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(approved);
+    };
+
+    const onAbort = () => {
+      pendingToolApprovalResolvers.delete(toolCallId);
+      pendingToolApprovals = pendingToolApprovals.filter((item) => item.toolCallId !== toolCallId);
+      finalize(false);
+      renderApp();
+    };
+
+    pendingToolApprovalResolvers.set(toolCallId, finalize);
+    pendingToolApprovals = [
+      ...pendingToolApprovals,
+      {
+        toolCallId,
+        toolName,
+        argsText: toPrettyJson(args),
+        createdAt: Date.now(),
+      },
+    ];
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    renderApp();
+  });
 };
 
 const generateSessionId = () => {
@@ -310,6 +416,12 @@ const persistPreferredModel = async (model: Model<any>) => {
 const persistSelectedProjectPath = async (projectPath: string) => {
   selectedProjectPath = projectPath;
   await storage.settings.set("chat.selectedProjectPath", projectPath);
+
+  if (agent) {
+    agent.state.systemPrompt = buildSystemPrompt(projectPath);
+    agent.state.tools = buildAgentTools(projectPath);
+    renderApp();
+  }
 };
 
 const loadPersistedProjectPath = async () => {
@@ -978,6 +1090,35 @@ const renderChatPanel = () => {
       </div>
 
       <div class="mobile-chat-footer">
+        ${pendingToolApprovals.length > 0
+          ? html`
+              <div class="tool-approval-card">
+                <div class="tool-approval-header">
+                  <strong>Approval dibutuhkan</strong>
+                  <span>${pendingToolApprovals.length} pending</span>
+                </div>
+                <div class="tool-approval-body">
+                  <div class="tool-approval-title">Tool: ${pendingToolApprovals[0]!.toolName}</div>
+                  <pre>${pendingToolApprovals[0]!.argsText}</pre>
+                </div>
+                <div class="tool-approval-actions">
+                  <button
+                    class="subscription-secondary-button"
+                    @click=${() => resolveToolApproval(pendingToolApprovals[0]!.toolCallId, false)}
+                  >
+                    Tolak
+                  </button>
+                  <button
+                    class="subscription-primary-button"
+                    @click=${() => resolveToolApproval(pendingToolApprovals[0]!.toolCallId, true)}
+                  >
+                    Approve
+                  </button>
+                </div>
+              </div>
+            `
+          : html``}
+
         <div class="mobile-chat-feedback-row">
           <div class="mobile-chat-project-chip">${formatProjectPath(selectedProjectPath)}</div>
           <div class="mobile-chat-feedback-actions">
@@ -1066,40 +1207,24 @@ const createSettingsTabs = (): SettingsTab[] => {
 };
 
 const createAgent = async (initialState?: Partial<AgentState>) => {
+  clearPendingToolApprovals();
+
   if (agentUnsubscribe) {
     agentUnsubscribe();
   }
 
   const defaultModel = initialState?.model ?? (await resolveDefaultModel());
-  const projectInstruction = `Current project folder: ${formatProjectPath(selectedProjectPath)}`;
+  const systemPrompt = initialState?.systemPrompt || buildSystemPrompt(selectedProjectPath);
   const resolvedInitialState: Partial<AgentState> = initialState
     ? {
-        systemPrompt:
-          initialState.systemPrompt ||
-          `You are a helpful AI assistant with access to various tools.
-
-${projectInstruction}
-
-Available tools:
-- JavaScript REPL: Execute JavaScript code in a sandboxed browser environment.
-- Artifacts: Create interactive HTML, SVG, Markdown, and text artifacts.
-
-Use the available tools when they help you answer more accurately.`,
+        systemPrompt,
         model: initialState.model ?? defaultModel,
         thinkingLevel: initialState.thinkingLevel ?? "off",
         messages: initialState.messages ?? [],
         tools: initialState.tools ?? [],
       }
     : {
-        systemPrompt: `You are a helpful AI assistant with access to various tools.
-
-${projectInstruction}
-
-Available tools:
-- JavaScript REPL: Execute JavaScript code in a sandboxed browser environment.
-- Artifacts: Create interactive HTML, SVG, Markdown, and text artifacts.
-
-Use the available tools when they help you answer more accurately.`,
+        systemPrompt,
         model: defaultModel,
         thinkingLevel: "off",
         messages: [],
@@ -1129,9 +1254,15 @@ Use the available tools when they help you answer more accurately.`,
     void persistPreferredModel(defaultModel);
   }
 
-  const replTool = createJavaScriptReplTool();
-  (replTool as any).runtimeProvidersFactory = () => [];
-  agent.state.tools = [replTool];
+  agent.state.tools = buildAgentTools(selectedProjectPath);
+
+  agent.beforeToolCall = async ({ toolCall, args }, signal) => {
+    const approved = await requestToolApproval(toolCall.id, toolCall.name, args, signal);
+    if (!approved) {
+      return { block: true, reason: "Tool execution rejected by user." };
+    }
+    return undefined;
+  };
 
   agentUnsubscribe = agent.subscribe((event: AgentEvent) => {
     setDebugAction(`event:${event.type}`);
