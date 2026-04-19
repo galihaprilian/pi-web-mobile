@@ -44,6 +44,14 @@ export interface ProjectDirectoryResponse {
   entries: ProjectDirectoryEntry[];
 }
 
+export interface StartupContext {
+  startupId: string;
+  defaultProjectPath: string;
+  requireProjectSelection: boolean;
+  launchMode: string;
+  sourceCwd: string;
+}
+
 export interface PiSessionListItem {
   path: string;
   id: string;
@@ -129,6 +137,10 @@ export async function getOAuthModels(providerId: string): Promise<any[]> {
 
 export async function listProjectDirectories(path = ""): Promise<ProjectDirectoryResponse> {
   return request<ProjectDirectoryResponse>(`/api/projects?path=${encodeURIComponent(path)}`);
+}
+
+export async function getStartupContext(): Promise<StartupContext> {
+  return request<StartupContext>("/api/startup-context");
 }
 
 export async function listPiSessions(projectPath = ""): Promise<PiSessionListItem[]> {

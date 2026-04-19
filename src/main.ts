@@ -40,6 +40,7 @@ import {
   createServerStreamFn,
   getOAuthApiKey,
   getOAuthModels,
+  getStartupContext,
   listOAuthProviders,
   listPiSessions,
   listProjectDirectories,
@@ -129,6 +130,8 @@ let isProjectSheetOpen = false;
 let projectSheetLoading = false;
 let projectSheetError = "";
 let projectDirectory: ProjectDirectoryResponse | null = null;
+let startupContextId = "";
+let shouldPromptProjectOnInit = false;
 void MessageEditor;
 void MessageList;
 void StreamingMessageContainer;
@@ -306,6 +309,25 @@ const persistSelectedProjectPath = async (projectPath: string) => {
 
 const loadPersistedProjectPath = async () => {
   selectedProjectPath = (await storage.settings.get<string>("chat.selectedProjectPath")) || "";
+};
+
+const applyStartupContext = async () => {
+  const startup = await getStartupContext();
+  const lastSeenStartupId = window.localStorage.getItem("pi-web-mobile:last-startup-id") || "";
+
+  startupContextId = startup.startupId;
+  shouldPromptProjectOnInit = false;
+
+  if (startup.startupId !== lastSeenStartupId) {
+    if (startup.requireProjectSelection) {
+      await persistSelectedProjectPath("");
+      shouldPromptProjectOnInit = true;
+    } else {
+      await persistSelectedProjectPath(startup.defaultProjectPath || "");
+    }
+
+    window.localStorage.setItem("pi-web-mobile:last-startup-id", startup.startupId);
+  }
 };
 
 const hasRealApiKey = async (provider: string) => {
@@ -1633,6 +1655,7 @@ async function initApp() {
   );
 
   await loadPersistedProjectPath();
+  await applyStartupContext();
   await refreshOauthProviders();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -1649,6 +1672,10 @@ async function initApp() {
   }
 
   renderApp();
+
+  if (shouldPromptProjectOnInit) {
+    void openProjectSheet();
+  }
 }
 
 void initApp();

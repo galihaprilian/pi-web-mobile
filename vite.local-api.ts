@@ -35,6 +35,8 @@ type LoginSessionState = {
 const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
 const AUTH_FILE_PATH = path.join(AGENT_DIR, "auth.json");
 const SESSIONS_ROOT = path.join(AGENT_DIR, "sessions");
+const APP_STATE_DIR = path.join(os.homedir(), ".config", "pi-web-mobile");
+const STARTUP_STATE_PATH = path.join(APP_STATE_DIR, "runtime-state.json");
 const HOME_DIR = os.homedir();
 const loginSessions = new Map<string, LoginSessionState>();
 let piCodingAgentModulePromise: Promise<any> | undefined;
@@ -42,6 +44,37 @@ let piMessagesModulePromise: Promise<any> | undefined;
 
 function ensureAuthDir() {
   fs.mkdirSync(path.dirname(AUTH_FILE_PATH), { recursive: true });
+}
+
+function ensureAppStateDir() {
+  fs.mkdirSync(APP_STATE_DIR, { recursive: true });
+}
+
+function readStartupState() {
+  ensureAppStateDir();
+  if (!fs.existsSync(STARTUP_STATE_PATH)) {
+    const fallback = {
+      startupId: `${Date.now()}-fallback`,
+      defaultProjectPath: "",
+      requireProjectSelection: true,
+      launchMode: "service",
+      sourceCwd: "",
+    };
+    fs.writeFileSync(STARTUP_STATE_PATH, JSON.stringify(fallback, null, 2), "utf8");
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(STARTUP_STATE_PATH, "utf8"));
+  } catch {
+    return {
+      startupId: `${Date.now()}-fallback`,
+      defaultProjectPath: "",
+      requireProjectSelection: true,
+      launchMode: "service",
+      sourceCwd: "",
+    };
+  }
 }
 
 function readAuthFile(): AuthFileShape {
@@ -340,6 +373,11 @@ async function apiHandler(req: any, res: any, next: () => void) {
   const method = (req.method || "GET").toUpperCase();
 
   try {
+    if (url.pathname === "/api/startup-context" && method === "GET") {
+      json(res, 200, readStartupState());
+      return;
+    }
+
     if (url.pathname === "/api/chat/stream" && method === "POST") {
       const body = await readBody(req);
       res.statusCode = 200;

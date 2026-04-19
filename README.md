@@ -44,6 +44,32 @@ Atau langsung dengan Vite:
 npm run dev
 ```
 
+## Menjalankan dari folder manapun dengan `piwebmo`
+
+Setelah instalasi lokal, kamu bisa menjalankan:
+
+```bash
+cd /path/ke/project
+piwebmo
+```
+
+Perilaku:
+- service Pi Web Mobile akan restart
+- folder saat perintah dijalankan menjadi **default project** saat web pertama dibuka
+- jika perintah dijalankan dari folder di luar home, app akan meminta pilih project dulu
+
+Alias berikut juga tersedia:
+
+```bash
+piwebmon
+```
+
+Untuk memasang command + systemd user service:
+
+```bash
+./scripts/install-local.sh
+```
+
 ## Akses dari mobile / Tailscale
 
 Untuk penggunaan via Tailscale:
