@@ -19,7 +19,8 @@ chmod +x \
   "$REPO_DIR/scripts/piwebmo-control.sh" \
   "$REPO_DIR/scripts/piwebmo-stop.sh" \
   "$REPO_DIR/scripts/piwebmo-status.sh" \
-  "$REPO_DIR/scripts/piwebmo-open.sh"
+  "$REPO_DIR/scripts/piwebmo-open.sh" \
+  "$REPO_DIR/scripts/piwebmo-doctor.sh"
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -73,6 +74,12 @@ exec "$REPO_DIR/scripts/piwebmo-open.sh" "\$@"
 EOF
 chmod +x "$BIN_DIR/piwebmo-open"
 
+cat > "$BIN_DIR/piwebmo-doctor" <<EOF
+#!/usr/bin/env bash
+exec "$REPO_DIR/scripts/piwebmo-doctor.sh" "\$@"
+EOF
+chmod +x "$BIN_DIR/piwebmo-doctor"
+
 systemctl --user daemon-reload
 systemctl --user enable pi-web-mobile.service >/dev/null
 systemctl --user restart pi-web-mobile.service || systemctl --user start pi-web-mobile.service
@@ -86,7 +93,7 @@ fi
 echo "Installed:"
 echo "- Service: $SERVICE_FILE"
 echo "- Runtime mode: $RUNTIME_MODE"
-echo "- Commands: $BIN_DIR/piwebmo, $BIN_DIR/piwebmon, $BIN_DIR/piwebmo-stop, $BIN_DIR/piwebmo-status, $BIN_DIR/piwebmo-open"
+echo "- Commands: $BIN_DIR/piwebmo, $BIN_DIR/piwebmon, $BIN_DIR/piwebmo-stop, $BIN_DIR/piwebmo-status, $BIN_DIR/piwebmo-open, $BIN_DIR/piwebmo-doctor"
 echo "- URL: http://$TAILSCALE_HOST:$PORT"
 echo ""
 echo "Usage:"

@@ -73,11 +73,14 @@ Untuk memasang command + systemd user service:
 Command operasional tambahan:
 
 ```bash
-piwebmo-status          # lihat status service + runtime state
-piwebmo-status --json   # output status dalam JSON
-piwebmo-stop            # stop service
-piwebmo-open            # buka URL Tailscale app
-piwebmo-open --local    # buka http://localhost:<port>
+piwebmo-status              # lihat status service + runtime state
+piwebmo-status --json       # output status dalam JSON
+piwebmo-status --watch      # refresh status terus (default interval 2 detik)
+piwebmo-status --watch --interval 1
+piwebmo-stop                # stop service
+piwebmo-open                # buka URL Tailscale app
+piwebmo-open --local        # buka http://localhost:<port>
+piwebmo-doctor              # diagnosa setup (systemd, linger, command, port, health)
 ```
 
 Catatan runtime service:
