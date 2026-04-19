@@ -1,6 +1,15 @@
 # Pi Web Mobile
 
+[![CI](https://github.com/galihaprilian/pi-web-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/galihaprilian/pi-web-mobile/actions/workflows/ci.yml)
+[![Release Build](https://github.com/galihaprilian/pi-web-mobile/actions/workflows/release.yml/badge.svg)](https://github.com/galihaprilian/pi-web-mobile/actions/workflows/release.yml)
+
+
 Pi Web Mobile adalah antarmuka mobile-first untuk pengalaman chat `pi` di web, dengan fokus pada:
+
+Repository:
+- GitHub: `galihaprilian/pi-web-mobile`
+- URL: https://github.com/galihaprilian/pi-web-mobile
+
 
 - penggunaan dari HP / browser mobile
 - auth subscription yang berbagi session dengan `pi` coding agent
