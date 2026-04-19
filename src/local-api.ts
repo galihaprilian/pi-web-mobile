@@ -50,6 +50,8 @@ export interface StartupContext {
   requireProjectSelection: boolean;
   launchMode: string;
   sourceCwd: string;
+  runtimeMode?: string;
+  servicePort?: number;
 }
 
 export interface PiSessionListItem {

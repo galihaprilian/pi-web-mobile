@@ -59,6 +59,8 @@ function readStartupState() {
       requireProjectSelection: true,
       launchMode: "service",
       sourceCwd: "",
+      runtimeMode: "preview",
+      servicePort: 5173,
     };
     fs.writeFileSync(STARTUP_STATE_PATH, JSON.stringify(fallback, null, 2), "utf8");
     return fallback;
@@ -73,6 +75,8 @@ function readStartupState() {
       requireProjectSelection: true,
       launchMode: "service",
       sourceCwd: "",
+      runtimeMode: "preview",
+      servicePort: 5173,
     };
   }
 }

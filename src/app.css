@@ -176,6 +176,25 @@ body {
   opacity: 0.72;
 }
 
+.mobile-chat-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: min(100%, 52rem);
+  margin: 0 auto 0.4rem;
+  padding-inline: 0.25rem;
+}
+
+.mobile-chat-status-chip {
+  font-size: 0.64rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  opacity: 0.75;
+}
+
 .mobile-chat-debug-bar {
   display: flex;
   flex-wrap: wrap;

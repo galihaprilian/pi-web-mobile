@@ -70,6 +70,22 @@ Untuk memasang command + systemd user service:
 ./scripts/install-local.sh
 ```
 
+Command operasional tambahan:
+
+```bash
+piwebmo-status   # lihat status service + runtime state
+piwebmo-stop     # stop service
+piwebmo-open     # buka URL app (best effort)
+```
+
+Catatan runtime service:
+- default mode: `preview` (build + vite preview, lebih production-like)
+- override ke mode dev bila perlu:
+
+```bash
+PIWEBMO_RUNTIME_MODE=dev ./scripts/install-local.sh
+```
+
 ## Akses dari mobile / Tailscale
 
 Untuk penggunaan via Tailscale:

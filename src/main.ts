@@ -131,6 +131,11 @@ let projectSheetLoading = false;
 let projectSheetError = "";
 let projectDirectory: ProjectDirectoryResponse | null = null;
 let startupContextId = "";
+let startupLaunchMode = "unknown";
+let startupRuntimeMode = "unknown";
+let startupSourceCwd = "";
+let startupDefaultProjectPath = "";
+let startupServicePort: number | undefined;
 let shouldPromptProjectOnInit = false;
 void MessageEditor;
 void MessageList;
@@ -316,6 +321,11 @@ const applyStartupContext = async () => {
   const lastSeenStartupId = window.localStorage.getItem("pi-web-mobile:last-startup-id") || "";
 
   startupContextId = startup.startupId;
+  startupLaunchMode = startup.launchMode || "unknown";
+  startupRuntimeMode = startup.runtimeMode || "unknown";
+  startupSourceCwd = startup.sourceCwd || "";
+  startupDefaultProjectPath = startup.defaultProjectPath || "";
+  startupServicePort = startup.servicePort;
   shouldPromptProjectOnInit = false;
 
   if (startup.startupId !== lastSeenStartupId) {
@@ -933,6 +943,8 @@ const renderChatPanel = () => {
   const hasVisibleThinking = streamingContent.some(
     (block: any) => block.type === "thinking" && (block.thinking || "").trim().length > 0,
   );
+  const startupProjectLabel = startupDefaultProjectPath || "~";
+  const startupSourceLabel = startupSourceCwd || "-";
 
   return html`
     <div class="mobile-chat-panel">
@@ -981,6 +993,11 @@ const renderChatPanel = () => {
             </button>
           </div>
         </div>
+        <div class="mobile-chat-status-row" title=${`startup:${startupContextId}`}>
+          <span class="mobile-chat-status-chip">launch:${startupLaunchMode}</span>
+          <span class="mobile-chat-status-chip">runtime:${startupRuntimeMode}</span>
+          <span class="mobile-chat-status-chip">transport:server-stream</span>
+        </div>
         ${isDebugVisible
           ? html`<div class="mobile-chat-debug-bar">
               <span>provider: ${provider}</span>
@@ -994,6 +1011,11 @@ const renderChatPanel = () => {
               <span>tool-blocks: ${streamingToolBlocks}</span>
               <span>visible-thinking: ${hasVisibleThinking ? "yes" : "no"}</span>
               <span>action: ${debugLastAction}</span>
+              <span>startup-id: ${startupContextId || "-"}</span>
+              <span>startup-project: ${startupProjectLabel}</span>
+              <span>startup-cwd: ${startupSourceLabel}</span>
+              <span>runtime-mode: ${startupRuntimeMode}</span>
+              <span>service-port: ${startupServicePort ?? "-"}</span>
               ${debugLastError ? html`<span class="is-error">err: ${debugLastError}</span>` : html``}
             </div>`
           : html``}

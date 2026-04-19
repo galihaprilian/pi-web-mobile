@@ -11,13 +11,19 @@ NODE_PATH_DIR="$(dirname "$NPM_BIN")"
 PORT="${PIWEBMO_PORT:-5173}"
 HOST="${PIWEBMO_HOST:-0.0.0.0}"
 TAILSCALE_HOST="${PIWEBMO_TAILSCALE_HOST:-work01.tucuxi-dace.ts.net}"
+RUNTIME_MODE="${PIWEBMO_RUNTIME_MODE:-preview}"
 
 mkdir -p "$SYSTEMD_USER_DIR" "$BIN_DIR"
-chmod +x "$REPO_DIR/scripts/piwebmo-service-wrapper.sh" "$REPO_DIR/scripts/piwebmo-control.sh"
+chmod +x \
+  "$REPO_DIR/scripts/piwebmo-service-wrapper.sh" \
+  "$REPO_DIR/scripts/piwebmo-control.sh" \
+  "$REPO_DIR/scripts/piwebmo-stop.sh" \
+  "$REPO_DIR/scripts/piwebmo-status.sh" \
+  "$REPO_DIR/scripts/piwebmo-open.sh"
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Pi Web Mobile dev service
+Description=Pi Web Mobile service
 After=network.target
 
 [Service]
@@ -27,6 +33,7 @@ Environment=PIWEBMO_NPM_BIN=$NPM_BIN
 Environment=PIWEBMO_PORT=$PORT
 Environment=PIWEBMO_HOST=$HOST
 Environment=PIWEBMO_TAILSCALE_HOST=$TAILSCALE_HOST
+Environment=PIWEBMO_RUNTIME_MODE=$RUNTIME_MODE
 Environment=PATH=$NODE_PATH_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=$REPO_DIR/scripts/piwebmo-service-wrapper.sh
 Restart=always
@@ -48,6 +55,24 @@ exec "$REPO_DIR/scripts/piwebmo-control.sh" "\$@"
 EOF
 chmod +x "$BIN_DIR/piwebmon"
 
+cat > "$BIN_DIR/piwebmo-stop" <<EOF
+#!/usr/bin/env bash
+exec "$REPO_DIR/scripts/piwebmo-stop.sh" "\$@"
+EOF
+chmod +x "$BIN_DIR/piwebmo-stop"
+
+cat > "$BIN_DIR/piwebmo-status" <<EOF
+#!/usr/bin/env bash
+exec "$REPO_DIR/scripts/piwebmo-status.sh" "\$@"
+EOF
+chmod +x "$BIN_DIR/piwebmo-status"
+
+cat > "$BIN_DIR/piwebmo-open" <<EOF
+#!/usr/bin/env bash
+exec "$REPO_DIR/scripts/piwebmo-open.sh" "\$@"
+EOF
+chmod +x "$BIN_DIR/piwebmo-open"
+
 systemctl --user daemon-reload
 systemctl --user enable pi-web-mobile.service >/dev/null
 systemctl --user restart pi-web-mobile.service || systemctl --user start pi-web-mobile.service
@@ -60,7 +85,8 @@ fi
 
 echo "Installed:"
 echo "- Service: $SERVICE_FILE"
-echo "- Commands: $BIN_DIR/piwebmo and $BIN_DIR/piwebmon"
+echo "- Runtime mode: $RUNTIME_MODE"
+echo "- Commands: $BIN_DIR/piwebmo, $BIN_DIR/piwebmon, $BIN_DIR/piwebmo-stop, $BIN_DIR/piwebmo-status, $BIN_DIR/piwebmo-open"
 echo "- URL: http://$TAILSCALE_HOST:$PORT"
 echo ""
 echo "Usage:"
